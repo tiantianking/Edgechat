@@ -13,6 +13,7 @@ interface MaintenanceEnv {
   DB?: Database;
   SESSIONS?: { get(key: string): Promise<unknown> };
   FILES?: { list(options: { limit: number }): Promise<unknown> };
+  FILE_STORE?: Namespace;
   CHANNEL_ROOM?: Namespace;
   USER_INBOX?: Namespace;
   SCHEDULER?: Namespace;
@@ -95,7 +96,11 @@ export async function runSystemCheck(env: MaintenanceEnv, { timeoutMs = 8000 } =
   const [dbChecks, kv, r2, room, inbox, scheduler, bridge, call, notifications] = await Promise.all([
     database(),
     env.SESSIONS ? probe('sessions', async () => { await env.SESSIONS?.get('__edgechat_health__'); return {}; }, timeoutMs) : absent('sessions'),
-    env.FILES ? probe('files', async () => { await env.FILES?.list({ limit: 1 }); return {}; }, timeoutMs) : absent('files', true),
+    env.FILE_STORE
+      ? checkObject('files', env.FILE_STORE, 'FileStore', timeoutMs)
+      : env.FILES
+        ? probe('files', async () => { await env.FILES?.list({ limit: 1 }); return {}; }, timeoutMs)
+        : absent('files', true),
     checkObject('channelRoom', env.CHANNEL_ROOM, 'ChannelRoom', timeoutMs),
     checkObject('userInbox', env.USER_INBOX, 'UserInbox', timeoutMs),
     checkObject('scheduler', env.SCHEDULER, 'Scheduler', timeoutMs),

@@ -9,7 +9,7 @@ command = "npm run schema:generate"
 
 [vars]
 ADMIN_USERNAMES = "admin"
-MESSAGE_RETENTION_DAYS = "7"
+MESSAGE_RETENTION_DAYS = "1"
 SOFT_DELETE_RETENTION_DAYS = "60"
 GC_BATCH_SIZE = "90"
 GC_MAX_BATCHES_PER_RUN = "20"
@@ -21,8 +21,8 @@ GC_R2_OPERATION_BUDGET = "300"
 SITE_ORIGINS = ""
 R2_DELETE_MAX_RETRY = "8"
 ORPHAN_UPLOAD_RETENTION_DAYS = "1"
-ALLOWED_FILE_TYPES = "image/,video/,audio/,application/pdf,text/"
-MAX_FILE_SIZE = "20971520"
+ALLOWED_FILE_TYPES = "image/,audio/"
+MAX_FILE_SIZE = "1310720"
 
 [[d1_databases]]
 binding = "DB"
@@ -79,9 +79,17 @@ new_sqlite_classes = ["VoiceCall"]
 name = "TELEGRAM_NOTIFICATIONS"
 class_name = "TelegramNotifications"
 
+[[durable_objects.bindings]]
+name = "FILE_STORE"
+class_name = "FileStore"
+
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["TelegramNotifications"]
+
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["FileStore"]
 
 [assets]
 directory = "./frontend/dist"

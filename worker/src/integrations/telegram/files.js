@@ -4,6 +4,7 @@ import {
 	sanitizeFilename,
 } from "../../attachment-metadata.js";
 import { decryptAttachment, encryptAttachment } from "../../encryption.js";
+import { deleteStoredFile, getStoredFile, hasFileStorage, putStoredFile } from "../../file-storage.js";
 import { downloadTelegramFile, getTelegramFile } from "./client.js";
 
 export const TELEGRAM_BRIDGE_FILE_LIMIT = 16 * 1024 * 1024;
@@ -19,6 +20,11 @@ function telegramObjectKey({ telegramChatId, telegramMessageId, filename }) {
 	return `telegram/${telegramChatId}/${telegramMessageId}-${crypto.randomUUID()}${extension}`;
 }
 
+function telegramFileLimit(env) {
+	const configured = Number(env.MAX_FILE_SIZE || TELEGRAM_BRIDGE_FILE_LIMIT);
+	return Math.min(TELEGRAM_BRIDGE_FILE_LIMIT, Number.isFinite(configured) ? configured : TELEGRAM_BRIDGE_FILE_LIMIT);
+}
+
 export async function importTelegramAttachment(env, {
 	botToken,
 	telegramChatId,
@@ -26,32 +32,33 @@ export async function importTelegramAttachment(env, {
 	attachment,
 }) {
 	if (!attachment) return { attachment: null, skipReason: null };
-	if (!env.FILES) {
+	if (!hasFileStorage(env)) {
 		return {
 			attachment: null,
 			skipReason: TELEGRAM_FILE_SKIP_REASON.STORAGE_UNAVAILABLE,
 		};
 	}
-	if (attachment.fileSize > TELEGRAM_BRIDGE_FILE_LIMIT) {
+	const fileLimit = telegramFileLimit(env);
+	if (attachment.fileSize > fileLimit) {
 		return { attachment: null, skipReason: TELEGRAM_FILE_SKIP_REASON.TOO_LARGE };
 	}
 
 	const telegramFile = await getTelegramFile(botToken, attachment.fileId);
 	const resolvedSize = Number(telegramFile.file_size || attachment.fileSize || 0);
-	if (resolvedSize > TELEGRAM_BRIDGE_FILE_LIMIT) {
+	if (resolvedSize > fileLimit) {
 		return { attachment: null, skipReason: TELEGRAM_FILE_SKIP_REASON.TOO_LARGE };
 	}
 	const bytes = await downloadTelegramFile(
 		botToken,
 		telegramFile.file_path,
-		TELEGRAM_BRIDGE_FILE_LIMIT,
+		fileLimit,
 	);
 	const name = sanitizeFilename(attachment.fileName);
 	const type = normalizeContentType(attachment.mimeType) || "application/octet-stream";
 	const key = telegramObjectKey({ telegramChatId, telegramMessageId, filename: name });
-	// Telegram 只负责传输，正式附件在进入消息前即转换为 EdgeChat 自有加密 R2 对象。
+	// Telegram 只负责传输，正式附件在进入消息前即转换为 EdgeChat 自有加密对象。
 	const encrypted = await encryptAttachment(env, bytes, key);
-	await env.FILES.put(key, encrypted, {
+	await putStoredFile(env, key, encrypted, {
 		httpMetadata: { contentType: type, cacheControl: FILE_RESPONSE_CACHE_CONTROL },
 		customMetadata: { filename: name, edgechatEncryption: "v1", source: "telegram" },
 	});
@@ -77,21 +84,22 @@ export async function loadEdgeChatAttachment(env, attachment) {
 	if (!attachment) {
 		return { file: null, skipReason: TELEGRAM_FILE_SKIP_REASON.NOT_FOUND };
 	}
-	if (Number(attachment.size) > TELEGRAM_BRIDGE_FILE_LIMIT) {
+	const fileLimit = telegramFileLimit(env);
+	if (Number(attachment.size) > fileLimit) {
 		return { file: null, skipReason: TELEGRAM_FILE_SKIP_REASON.TOO_LARGE };
 	}
-	if (!env.FILES) {
+	if (!hasFileStorage(env)) {
 		return {
 			file: null,
 			skipReason: TELEGRAM_FILE_SKIP_REASON.STORAGE_UNAVAILABLE,
 		};
 	}
-	const object = await env.FILES.get(attachment.key);
+	const object = await getStoredFile(env, attachment.key);
 	if (!object) {
 		return { file: null, skipReason: TELEGRAM_FILE_SKIP_REASON.NOT_FOUND };
 	}
 	const decrypted = await decryptAttachment(env, await object.arrayBuffer(), attachment.key);
-	if (decrypted.bytes.byteLength > TELEGRAM_BRIDGE_FILE_LIMIT) {
+	if (decrypted.bytes.byteLength > fileLimit) {
 		return { file: null, skipReason: TELEGRAM_FILE_SKIP_REASON.TOO_LARGE };
 	}
 	return {
@@ -108,9 +116,9 @@ export async function loadEdgeChatAttachment(env, attachment) {
 }
 
 export async function deleteImportedTelegramAttachment(env, attachment) {
-	if (!attachment?.key || !env.FILES) return;
+	if (!attachment?.key || !hasFileStorage(env)) return;
 	try {
-		await env.FILES.delete(attachment.key);
+		await deleteStoredFile(env, attachment.key);
 	} catch (error) {
 		console.warn(JSON.stringify({
 			message: "telegram orphan attachment delete failed",

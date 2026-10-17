@@ -14,6 +14,7 @@ import {
   submitClientRoomAction
 } from '../do-bridge.js';
 import { ApiError } from '../errors.js';
+import { hasFileStorage } from '../file-storage.js';
 import { authMiddleware } from '../middleware.js';
 import {
   createMobileDeviceSession,
@@ -94,7 +95,7 @@ export function registerV1Routes(app) {
         deviceSessions: true,
         realtimeTickets: true,
         idempotentMessages: true,
-        idempotentUploads: Boolean(c.env.FILES),
+        idempotentUploads: hasFileStorage(c.env),
         roomSync: true,
         backgroundPush: false
       }
@@ -264,8 +265,8 @@ export function registerV1Routes(app) {
   });
 
   app.post('/api/v1/uploads', authMiddleware, async (c) => {
-    if (!c.env.FILES) {
-      return v1ErrorResponse('attachments_unavailable', '当前部署没有绑定 R2，无法上传附件', 503);
+    if (!hasFileStorage(c.env)) {
+      return v1ErrorResponse('attachments_unavailable', '当前部署没有可用的附件存储', 503);
     }
     const maxFileSize = Number(c.env.MAX_FILE_SIZE || 20971520);
     if (requestBodyTooLarge(c.req.raw, maxFileSize + 1024 * 1024)) {

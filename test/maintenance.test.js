@@ -10,6 +10,7 @@ import { Scheduler } from "../worker/src/do/Scheduler.js";
 import { InstanceBridge } from "../worker/src/do/InstanceBridge.ts";
 import { VoiceCall } from "../worker/src/do/VoiceCall.ts";
 import { TelegramNotifications } from "../worker/src/do/TelegramNotifications.ts";
+import { FileStore } from "../worker/src/do/FileStore.ts";
 import { authMiddleware, adminMiddleware } from "../worker/src/middleware.js";
 import initSqlJs from 'sql.js';
 import { readFileSync } from 'node:fs';
@@ -43,7 +44,7 @@ test("DO health requires verified GET and has no storage/alarm side effects", ()
   assert.equal(durableObjectHealth(new Request(request.url, { method: "POST", headers: request.headers }), "ChannelRoom").status, 405);
 });
 
-test("real DO health probes are read-only for all six Durable Objects", async () => {
+test("real DO health probes are read-only for all seven Durable Objects", async () => {
   const calls = { storage: 0, alarm: 0, broadcast: 0 };
   const state = {
     getWebSockets: () => [],
@@ -60,7 +61,7 @@ test("real DO health probes are read-only for all six Durable Objects", async ()
   inbox.broadcast = () => { calls.broadcast++; };
   const scheduler = new Scheduler(state, {});
   const request = () => new Request("https://internal/health", { headers: { "x-cfchat-internal-auth": "worker-verified" } });
-  for (const object of [room, inbox, scheduler, new InstanceBridge(state, {}), new VoiceCall(state, {}), new TelegramNotifications(state, {})]) {
+  for (const object of [room, inbox, scheduler, new InstanceBridge(state, {}), new VoiceCall(state, {}), new TelegramNotifications(state, {}), new FileStore(state)]) {
     const response = await object.fetch(request());
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { ok: true, service: object.constructor.name });

@@ -424,7 +424,8 @@ onBeforeUnmount(() => {
 			<input
 				ref="fileInput"
 				type="file"
-					multiple
+				accept="image/*"
+				multiple
 				class="composer-file-input"
 				@change="handleFileSelected"
 			/>

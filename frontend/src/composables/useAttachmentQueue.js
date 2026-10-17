@@ -1,4 +1,5 @@
 import { computed, onScopeDispose, ref } from "vue";
+import { compressImageForUpload } from "../image-compression.js";
 
 export function useAttachmentQueue(uploadFile) {
 	const pendingAttachments = ref([]);
@@ -25,6 +26,13 @@ export function useAttachmentQueue(uploadFile) {
 		entry.status = "uploading";
 		entry.error = "";
 		try {
+			const compression = compressImageForUpload(entry.file);
+			const prepared = compression instanceof Promise ? await compression : compression;
+			if (prepared !== entry.file) {
+				if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+				entry.file = prepared;
+				entry.previewUrl = URL.createObjectURL(prepared);
+			}
 			const payload = await uploadFile(entry.file);
 			entry.attachment = payload.file;
 			entry.status = "ready";

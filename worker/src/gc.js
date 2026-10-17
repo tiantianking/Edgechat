@@ -1,5 +1,6 @@
 import { hardDeleteChannels } from "./data/channel-deletion.ts";
 import { classifyStoredSiteIcon } from "./site-icon.js";
+import { deleteStoredFile } from './file-storage.js';
 
 const DEFAULT_MESSAGE_RETENTION_DAYS = 7;
 const DEFAULT_SOFT_DELETE_RETENTION_DAYS = 60;
@@ -330,7 +331,7 @@ async function processR2Rows(env, config, summary, rows, siteIconKey, budget) {
 		budget.spend({ r2Operations: 1 });
 		progressed = true;
 		try {
-			await env.FILES.delete(key);
+			await deleteStoredFile(env, key);
 			const completed = await completeR2Delete(env.DB, key, budget);
 			if (!completed) {
 				budget.markExhausted();
