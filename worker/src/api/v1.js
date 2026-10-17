@@ -1,5 +1,5 @@
 import { verifyPassword } from '../auth.js';
-import { saveUploadedFile } from './upload.js';
+import { saveUploadedFile, UPLOAD_STORAGE_CAPACITY_ERROR } from './upload.js';
 import {
   getRoomSyncCursor,
   listMessages,
@@ -292,6 +292,9 @@ export function registerV1Routes(app) {
       const message = String(error?.message || '上传失败');
       if (message.startsWith('文件大小不能超过') || message === '该文件类型不允许上传') {
         return v1ErrorResponse('upload_rejected', message);
+      }
+      if (message === UPLOAD_STORAGE_CAPACITY_ERROR) {
+        return v1ErrorResponse('storage_capacity_guard', message, 507);
       }
       throw error;
     }

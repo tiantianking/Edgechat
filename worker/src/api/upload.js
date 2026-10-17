@@ -12,6 +12,8 @@ import { deleteStoredFile, getStoredFile, hasFileStorage, putStoredFile } from '
 
 const FILE_RESPONSE_CACHE_CONTROL = 'private, no-store';
 const UPLOAD_BODY_OVERHEAD_BYTES = 1024 * 1024;
+const DEFAULT_FILE_STORAGE_BUDGET_BYTES = 3_000_000_000;
+export const UPLOAD_STORAGE_CAPACITY_ERROR = '附件存储正在自动清理，请稍后再试';
 const BLOCKED_MIME_TYPES = new Set([
   'text/html',
   'application/xhtml+xml',
@@ -72,6 +74,20 @@ function validateUpload(env, file) {
   }
 }
 
+export async function assertUploadStorageCapacity(env, incomingBytes) {
+  const configured = Number(env.FILE_STORAGE_BUDGET_BYTES || DEFAULT_FILE_STORAGE_BUDGET_BYTES);
+  const budget = Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_FILE_STORAGE_BUDGET_BYTES;
+  const row = await env.DB.prepare(
+    'SELECT COALESCE(SUM(size), 0) AS stored_bytes FROM uploaded_files'
+  ).first();
+  const storedBytes = Math.max(0, Number(row?.stored_bytes || 0));
+  if (storedBytes + Math.max(0, Number(incomingBytes || 0)) > budget) {
+    throw new Error(UPLOAD_STORAGE_CAPACITY_ERROR);
+  }
+}
+
 export function registerUploadRoutes(app) {
   app.post('/api/upload', async (c) => {
     if (!hasFileStorage(c.env)) {
@@ -97,6 +113,7 @@ export function registerUploadRoutes(app) {
       if (message.startsWith('文件大小不能超过') || message === '该文件类型不允许上传') {
         return errorResponse(message);
       }
+      if (message === UPLOAD_STORAGE_CAPACITY_ERROR) return errorResponse(message, 507);
       throw error;
     }
   });
@@ -168,6 +185,7 @@ export async function saveUploadedFile(env, session, file, { clientUploadId = nu
     const existing = await getUploadedFileByClientId(env.DB, session.userId, clientUploadId);
     if (existing) return { file: existing, created: false };
   }
+  await assertUploadStorageCapacity(env, file.size);
 
   const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
   const key = `${session.userId}/${Date.now()}-${crypto.randomUUID()}${extension}`;

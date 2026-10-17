@@ -70,11 +70,12 @@ function fixture(t, { customized = false, conflict = false } = {}) {
 		originHead: () => command(origin, ["rev-parse", "main"]),
 		read: (name) => readFileSync(join(checkout, name), "utf8"),
 		git: (args) => command(checkout, args),
-		async sync(hasSyncToken = false) {
+		async sync(hasSyncToken = false, nowMs = Date.now()) {
 			return syncUpstream({
 				repository: "example/Edgechat",
 				branch: "main",
 				hasSyncToken,
+				nowMs,
 				git: async (args) => {
 					if (rejectPush && args[0] === "push")
 						throw new Error("Branch protection rejected push");
@@ -123,6 +124,22 @@ test("没有发布 trailer 的提交不会自动同步", async (t) => {
 	assert.deepEqual(await f.sync(), { updated: false, dispatched: false });
 	assert.equal(f.originHead(), f.base);
 	assert.equal(f.requests.length, 1);
+});
+
+test("连续 45 天没有提交时自动保活定时更新并派发一次部署", async (t) => {
+	const f = fixture(t);
+	const lastCommitSeconds = Number(f.git(["show", "-s", "--format=%ct", "HEAD"]));
+	const result = await f.sync(false, (lastCommitSeconds + 46 * 86400) * 1000);
+	assert.deepEqual(result, {
+		updated: false,
+		keptAlive: true,
+		dispatched: true,
+		commit: f.originHead(),
+	});
+	assert.match(
+		f.git(["log", "-1", "--format=%B"]),
+		/keep scheduled maintenance active \[skip ci\]/,
+	);
 });
 
 test("stable 一次合并之前的所有提交与版本，但不包含之后的开发提交", async (t) => {
@@ -267,4 +284,6 @@ test("每天两次检查，机器人推送后显式 dispatch，检查阶段不�
 		script,
 		/request\(`\$\{workflowPath\}\/dispatches`, \{ ref: branch \}\)/,
 	);
+	assert.match(script, /KEEPALIVE_AFTER_DAYS = 45/);
+	assert.match(script, /commit.*--allow-empty/s);
 });

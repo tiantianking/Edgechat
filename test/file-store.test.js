@@ -3,6 +3,10 @@ import test from 'node:test';
 
 import { FileStore, FILE_STORE_LIMITS } from '../worker/src/do/FileStore.ts';
 import {
+  assertUploadStorageCapacity,
+  UPLOAD_STORAGE_CAPACITY_ERROR,
+} from '../worker/src/api/upload.js';
+import {
   deleteStoredFile,
   fileStoreShardName,
   getStoredFile,
@@ -61,4 +65,23 @@ test('attachment shards isolate users and UTC upload days', () => {
   assert.equal(fileStoreShardName('1/1792214400000-a.webp'), 'user:1:2026-10-17');
   assert.equal(fileStoreShardName('2/1792214400000-a.webp'), 'user:2:2026-10-17');
   assert.equal(fileStoreShardName('telegram/-1001/9-a.ogg'), 'telegram:-1001:legacy');
+});
+
+test('attachment storage stops below the Cloudflare account limit and recovers after cleanup', async () => {
+  let storedBytes = 2_998_000_000;
+  const env = {
+    FILE_STORAGE_BUDGET_BYTES: '3000000000',
+    DB: {
+      prepare() {
+        return { first: async () => ({ stored_bytes: storedBytes }) };
+      },
+    },
+  };
+  await assertUploadStorageCapacity(env, 1_000_000);
+  await assert.rejects(
+    () => assertUploadStorageCapacity(env, 3_000_000),
+    new RegExp(UPLOAD_STORAGE_CAPACITY_ERROR),
+  );
+  storedBytes = 1_000_000;
+  await assertUploadStorageCapacity(env, 1_310_720);
 });

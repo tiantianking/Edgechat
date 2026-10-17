@@ -10,6 +10,7 @@ test('production defaults preserve no-R2 image storage and one-day retention', (
   const config = source('wrangler.example.toml');
   assert.match(config, /^MESSAGE_RETENTION_DAYS = "1"$/m);
   assert.match(config, /^MAX_FILE_SIZE = "1310720"$/m);
+  assert.match(config, /^FILE_STORAGE_BUDGET_BYTES = "3000000000"$/m);
   assert.match(config, /^ALLOWED_FILE_TYPES = "image\/,audio\/"$/m);
   assert.match(config, /name = "FILE_STORE"\s+class_name = "FileStore"/);
   assert.match(config, /tag = "v6"\s+new_sqlite_classes = \["FileStore"\]/);

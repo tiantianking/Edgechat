@@ -6,6 +6,7 @@ const exec = promisify(execFile);
 const UPSTREAM = "aozorae/Edgechat";
 const UPSTREAM_REF = "refs/remotes/edgechat-upstream/release";
 const DEPLOY_WORKFLOW = "deploy-worker.yml";
+const KEEPALIVE_AFTER_DAYS = 45;
 
 async function runGit(args) {
 	const { stdout } = await exec("git", args, {
@@ -34,6 +35,32 @@ async function githubRequest(path, body) {
 	return response.status === 204 ? undefined : response.json();
 }
 
+async function configureBot(git) {
+	await git(["config", "user.name", "github-actions[bot]"]);
+	await git([
+		"config",
+		"user.email",
+		"41898282+github-actions[bot]@users.noreply.github.com",
+	]);
+}
+
+async function keepScheduledWorkflowAlive(git, branch, nowMs) {
+	const lastCommitSeconds = Number(await git(["show", "-s", "--format=%ct", "HEAD"]));
+	const ageMs = nowMs - lastCommitSeconds * 1000;
+	if (!Number.isFinite(ageMs) || ageMs < KEEPALIVE_AFTER_DAYS * 86400_000) {
+		return false;
+	}
+	await configureBot(git);
+	await git([
+		"commit",
+		"--allow-empty",
+		"-m",
+		"chore: keep scheduled maintenance active [skip ci]",
+	]);
+	await git(["push", "origin", `HEAD:refs/heads/${branch}`]);
+	return true;
+}
+
 export function findUpdateCommit(log) {
 	// 用 Git 的 trailer 解析器只读取提交尾部参数，避免正文提到标记就触发发布。
 	const fields = log.split("\0");
@@ -53,6 +80,7 @@ export async function syncUpstream({
 	hasSyncToken = false,
 	git = runGit,
 	request = githubRequest,
+	nowMs = Date.now(),
 }) {
 	if (repository.toLowerCase() === UPSTREAM.toLowerCase()) {
 		console.log("上游主仓无需同步自身。");
@@ -75,22 +103,21 @@ export async function syncUpstream({
 			UPSTREAM_REF,
 		]),
 	);
-	if (!target) {
-		console.log("上游没有 stable/security 发布标记，保持当前版本。");
-		return { updated: false, dispatched: false };
-	}
-
 	let updated = false;
-	try {
+	let keptAlive = false;
+	const updateKind = target?.kind || "keepalive";
+	if (!target) {
+		keptAlive = await keepScheduledWorkflowAlive(git, branch, nowMs);
+		if (!keptAlive) {
+			console.log("上游没有 stable/security 发布标记，保持当前版本。");
+			return { updated: false, dispatched: false };
+		}
+	} else try {
 		await git(["merge-base", "--is-ancestor", target.commit, "HEAD"]);
+		keptAlive = await keepScheduledWorkflowAlive(git, branch, nowMs);
 	} catch (error) {
 		if (error.code !== 1) throw error;
-		await git(["config", "user.name", "github-actions[bot]"]);
-		await git([
-			"config",
-			"user.email",
-			"41898282+github-actions[bot]@users.noreply.github.com",
-		]);
+		await configureBot(git);
 		// 保留 fork 自己的提交；冲突或分支保护拒绝时直接失败，绝不强推。
 		await git([
 			"merge",
@@ -126,14 +153,14 @@ export async function syncUpstream({
 		(run) => run.conclusion === "success" || run.status !== "completed",
 	);
 	if (deployedOrRunning) {
-		console.log(`${target.kind}: ${commit} 已部署或正在部署，无需重复派发。`);
-		return { updated, dispatched: false, commit };
+		console.log(`${updateKind}: ${commit} 已部署或正在部署，无需重复派发。`);
+		return { updated, ...(keptAlive ? { keptAlive } : {}), dispatched: false, commit };
 	}
 	// GITHUB_TOKEN 的 push 不会触发 Actions；dispatch 是官方允许的例外。
 	// 即使上次推送后派发/部署失败，下次检查也会对当前 SHA 重新派发。
 	await request(`${workflowPath}/dispatches`, { ref: branch });
-	console.log(`${target.kind}: ${commit} 已同步，已派发 Deploy Worker。`);
-	return { updated, dispatched: true, commit };
+	console.log(`${updateKind}: ${commit} 已同步，已派发 Deploy Worker。`);
+	return { updated, ...(keptAlive ? { keptAlive } : {}), dispatched: true, commit };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
